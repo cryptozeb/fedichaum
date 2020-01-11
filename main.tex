@@ -1,0 +1,225 @@
+\documentclass[10pt,a4paper,twocolumn]{article}
+\usepackage[latin1]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[style=alphabetic,backend=biber]{biblatex}
+\usepackage{csquotes}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\addbibresource{references.bib}
+
+\author{Zeb\\\href{mailto:zebzeb@cryptogroup.net}{zebzeb@cryptogroup.net}\\\texttt{\footnotesize 1183CCC5 59188992 54D0FE6A F8876188 97EAC4D2}}
+\title{Federated Chaumian Banks}
+
+\begin{document}
+	\maketitle
+	
+	\begin{abstract}
+		Traditional chaumian banks suffer from needing a central party holding the collateral giving the chaumian tokens value. This enables nation state level attackers to seize the collateral partially or in full leading to insolvency of the chaumian bank. Furthermore trustlessly auditing chaumian banks is impossible. We show how Bitcoin's multisig feature can be leveraged to federate chaumian banks and thus reduce  trust and attack surface.
+	\end{abstract}
+
+\section{Introduction}
+Using blind signatures to issue untraceable bearer tokens was first described in \cite{Chaum82}.
+The entity issuing such blind signed bearer tokens will is called a mint $M$.
+This mint is responsible for issuing new tokens in exchange for the backing asset, transfer of tokens between participants and returning the backed asset in exchange for tokens.
+That means that both solvency and availability heavily depend on the security and honesty of the mint.
+
+That makes mints an attractive target for attackers that might want to steal from it or interrupt its service.
+The first problem couldn't be solved in the past because the ownership of the collateral asset had to be enforced in the physical realm.
+With adversaries like nation states that have virtually unlimited resources at their disposal it's impossible to build a safe system that way: every door, no matter how many locks, will only stand a welding torch for a certain time before it opens.
+
+Bitcoin fundamentally changed this providing unseizable money.
+The amount of resources and/or the coordination needed to seize bitcoins without knowing a valid script sig is so high that it's generally assumed to be out of reach even for nation state level attackers.
+
+So a pseudonymous mint backed by bitcoin would already be safe against nation state level attacks.
+But it being pseudonymous makes it less trustworthy in most cases since it could vanish and refuse to pay back the collateral at any time.
+
+This second problem can be solved by distributing the decision making process across multiple parties using a consensus protocol. Bitcoin's ability to jointly hold funds in multisig wallets makes this possible. We will explore the design space of such a distributed mint in this paper.
+
+\section{Background}
+In this section we will shortly describe the building blocks that we will use to construct a federated chaumian bank protocol-
+\subsection{Blind signatures}
+A blind signature scheme allows a party $A$ to acquire a valid signature for a message $m$ from $B$ without revealing the contents of $m$. To achieve that $A$ has to choose a blinding secret $b$, calculate a blinded message $m'$
+
+\begin{equation*}
+	m' = \text{blind}(m, b)
+\end{equation*}
+
+and let $B$ sign it, producing the signature $\sigma'$.
+
+\begin{equation*}
+	\sigma' = \text{sign}(m')
+\end{equation*}
+
+$\sigma'$ can then be unblinded to $\sigma$ using $b$w.
+
+\begin{equation*}
+	\sigma = \text{unblind}(\sigma', b)
+\end{equation*}
+
+$A$ is now in possession of a valid signature $\sigma$ for $m$ while $B$ can't connect $m$ with the signing event even when shown $\sigma$.
+
+\begin{equation*}
+	\text{verify}(m, \sigma) = \text{true}
+\end{equation*}
+
+
+\subsection{Chaumian Banks}
+Chaumian banks or mints support three actions that will be further described in this section:
+\begin{description}
+	\item[Issuance:] Exchanging an asset for blind signed tokens representing the asset
+	\item[Reissuance:] Exchanging blind signed tokens for fresh blind signed tokens to transfer ownership
+	\item[Payouts:] Exchange blind signed tokens for an asset
+\end{description}
+We will only describe the simplest version that uses different mint keys to distinguish the asset type and amount represented by the token. So each mint has multiple mint keys for different assets/token denominations.
+
+\subsubsection{Issuance}
+When a user $A$ wants to acquire tokens from a mint $M$ they have to deposit the asset represented by the tokens out of band first. $A$ also has to generate as many random tokens $t_1, \dots, t_m$ as asset amount transferred. These are blinded with blinding keys $b_1, \dots, b_m$ and sent to $M$ together with a cryptographic proof linking them to the out of band transfer.
+
+Once $M$ receives the deposit it signs the blinded tokens with the asset-specific mint key $k_{M, a}$ and returns the signatures $\sigma_, \dots, \sigma_m$.
+$A$ can now unblind these and use the token/signature tuples as proof that the mint owes them the backing asset but the mint doesn't know when they were issued or to whom.
+
+It's important that instead of encoding some user specific amount in the token multiple tokens of some generic denomination are being issued. This is important to achieve a large enough anonymity set. Otherwise the amount could be used to identify users.
+
+For efficiency reasons multiple denominations can be established using different mint keys as long as the anonymity set for each denomination pool stays large enough.
+
+\subsubsection{Reissuance}
+To transfer tokens from user $A$ to $B$ the token/signature tuple can't just simply be sent since $A$ would still be able to use the same token again. To avoid this so called double spend problem $B$ has to request a reissuance from the mint.
+
+For that $B$ sends the token/signature tuples received from $A$ and the same amount of newly blinded tokens to $M$.
+$B$ receives new signatures for its blinded tokens in exchange for the tokens from $A$.
+
+To avoid double spends itself $M$ has to track which unblinded tokens were already used. The ever growing list used for that is called the spent book.
+
+\subsubsection{Payouts}
+If a user $A$ wants to change tokens for the real backing asset they can request a payout from $M$. $A$ sends token/signature tuples to $M$ together with the necessary information for $M$ to send the according amount of backing asset out of band.
+
+\subsection{Bitcoin Multisig}
+Every bitcoin UTXO contains a script that defines its spend conditions. This scripting system can be used to realize $m$-of-$n$ signature requirements (called multisig in Bitcoin, threshold signatures in the literature). The current approach is to use \texttt{OP\_CHECKMULTISIG(VERIFY)} which limits $n$ to up to 15.
+Once Schnorr signatures \cite{Schnorr89} get introduced by BIP-taproot larger values of $n$ will become possible using a adaptation of MuSig \cite{MaxwellPSW19} described by Andrew Poelstra \cite{Poelstra19}.
+
+\subsection{Byzantine fault tolerance}
+Distributed systems that have to withstand not only failure but also malicious peers have to employ byzantine fault tolerance algorithms. For closed groups that's a well studied and solved problem\footnote{Bitcoin solved the same problem for open groups for the first time by sacrificing absolute finalty.}. The known algorithms mainly differ in complexity, cryptographic assumptions, efficiency and network requirements. They can generally be used to agree on state changes in the system as long as not more than a certain threshold of peers is malicious.
+A recent, efficient and asynchronous BFT algorithm is Honey Badger BFT \cite{DBLP:journals/iacr/MillerXCSS16}.
+
+\subsection{Threshold encryption}
+A threshold encryption scheme allows a message to be encrypted to a set of receivers. These receivers can only decrypt the message by working together and producing enough decryption shares. HBBFT uses it to avoid censorship of transactions by hiding them until they are agreed upon.
+
+\section{Federated mints}
+As described in INTRO federating the mint is essential to mitigate state level attacks. % FIXME: ref
+
+\subsection{Mitigating new possible attacks}
+By doing so we change our attacker model: we only trust the fed-mint as a whole, but not single federation members.
+
+Previously a user could just send a set of old and new tokens to a mint and ask for a reissue as long as the connection was secure and tamper proof. But now the mint receiving the request first could front run the user, stealing the money.
+
+There are two ways to mitigate this:
+\begin{itemize}
+	\item Instead of truly random data use public keys as tokens and use the corresponding private keys to sign the request in which it is consumed.
+	\item Hide the content of the request till consensus is reached to accept it if it's valid. This can be accomplished with threshold encryption as described in HBBFT. % FIXME: ref
+\end{itemize}
+
+The latter is more efficient for large amounts of tokens since it doesn't add a signature per token.
+% FIXME: performance considerations
+% FIXME: crypto assumptions
+
+Both ways allow that the user communicates with just one mint ant the inter-mint network spreads the request. If it's done like that the fed-mint nodes also have to encrypt their signatures for the use so other mints can't steal them when relaying the response. If the node a user is communicating through fails there has to be a recovery mechanism using which the newly minted tokens can be fetched from other nodes.
+
+\subsection{Deterministic Bitcoin wallet}
+By making the bitcoin wallet deterministic all operations involving its usage become much easier.
+The nodes don't have to come to a consensus about which UTXOs to use anymore.
+Instead this has to be defined in an algorithm that every well-behaving node follows.
+
+Building such a wallet is more of an engineering challenge.
+The main problem is adaptability to fee levels and network congestion.
+
+Many approaches for determining the appropriate fee level rely on the mempool.
+That's good for rough estimates but due to it not being globally agreed upon it can't be easily used in a consensus based system.
+Even the most recent blocks are risky to include in the calculation since smaller forks happen from time to time or coud be triggered by a malicious third party.
+
+That leaves three possible approaches:
+\begin{itemize}
+	\item Static fee level, overpaying during normal operation, might need to be adjusted manually during times of congestion
+	\item Calculating the fee level from the $n$ blocks $[\text{HEAD}-g,\text{HEAD}-g-n]$ where $g$ is a security gap from the head of the chain (there has to be agreement on the block height). This approach reuses Bitcoin's already established consensus.
+	\item Making fee levels part of the consensus
+\end{itemize}
+
+\subsection{Threshold blind signatures}
+The core piece of technology to make federated chaumian banks work is a threshold blind signature scheme.
+Some schemes have been proposed, but due to lack of implementations and use they seem to not have received the amount of scrutiny as other protocols.
+That's why a simpler approach using conventional blind signatures seems preferable. %FIXME: refs of proposed schemes
+
+Every signature scheme can be used to build a threshold signature scheme by requiring $m$ out of $n$ signatures. This approach does not work as easily for blind signatures since the set of signatures present can leak information about the context of the signing operation (e.g. time, reason for signing, $\dots$).
+
+Assuming that most of the time all fed-chaum nodes are online this might not be a problem. As long as the network is in a degraded state only previously issued tokens can be spent anonymously. All tokens reissued during that time have to be considerd tainted and need to be reissued first once the system recovers.
+
+\subsection{Abstract example protocol}
+For the abstract protocol we will assume tokens to have the denomination 1BTC. Instead of signatures of the request this protocol uses threshold encryption to avoid front running.
+
+\subsubsection{Issuance}
+Alice wants to exchange 10BTC for 10 tokens:
+\begin{enumerate}
+	\item Alice sends 10BTC to the publicly known multisig address of the federation. The transaction contains a commitment to a public key.
+	\item Alice sends a threshold encrypted issuance request containing 
+	\begin{itemize}
+		\item Proof of sending 10BTC to the federation wallet (e.g. signature of request with key committed to in the transaction)
+		\item 10 random, blinded tokens
+	\end{itemize}
+	to the federation.
+	\item The federation runs a consensus protocol to ensure that a quorum of nodes is aware of the request and acknowledges it. Due to the request being encrypted no front running or censorship can happen.
+	\item Once the consensus is achieved the nodes collaborate to decrypt the request. Checking the validity of the request is not dependent on state not alreay agreed on, so this step doesn't need a consensus protocol run.
+	\item Every node signs the tokens and encrypts the result to the key committed to in the transaction.
+	\item The responses containing the signatures are sent to Alice (through the node network or collected from all nodes).
+	\item Alice decrypts the blind signatures, unblinds them and combines them to valid tokens.
+\end{enumerate}
+
+\subsubsection{Reissuance}
+Alice wants to reissue 10 tokens received from Bob:
+\begin{enumerate}
+	\item Alice sends a threshold encrypted reissuance request containing
+	\begin{itemize}
+		\item 10 tokens with valid signatures received from Bob
+		\item 10 random tokens to be signed
+		\item a newly generated public key
+	\end{itemize}
+	to the federation.
+	\item The federation runs the consensus protocol as for Issuance and decrypts the request.
+	\item Each federation node adds the old tokens to its spend book.
+	\item Every node signs the new tokens and encrypts the result to the key included in the request.
+	\item The responses are sent back to Alice and decrypted by her.
+\end{enumerate}
+
+\subsubsection{Payouts}
+Alice wants to redeem 10 BTC from the federation:
+\begin{enumerate}
+	\item Alice sends a threshold encrypted payout request containing:
+	\begin{itemize}
+		\item 10 tokens with valid signatures received from Bob
+		\item the destination bitcoin address
+	\end{itemize}
+	to the federation.
+	\item The federation runs the consensus protocol as for Issuance and decrypts the request.
+	\item Each federation node adds the old tokens to its spend book.
+	\item Each node creates the payout transaction using the deterministic Bitcoin wallet, signs it and sends the signature to the other federation members.
+	\item As soon as enough signatures are present the transaction gets broadcasted into the Bitcoin network.
+\end{enumerate}
+
+\section{Incentives}
+Running a server reliably is expensive, so the node operators need an incentive to do so. Also processing transactions in a federated manner is much more complex than in the single mint scenario, so users need an incentive to not do frivolous transactions (e.g. sending 1sat every 0.1 seconds).
+
+During every user interaction (issuance, reissuance, payouts) with the mint fees can be imposed which incentivice running a fed-mint node. Demurrage could be used to disincentivice keeping large amounts in the federation since it increases the risk of attacks without providing any benefit to the mint.
+
+To ensure reliability of the system a deposit can be required for every mint. That deposit can be used to penalize offline nodes as long as the consensus is still intact. Once the consensus is lost no penalties are possible anymore since the federation can't agree any more on who is offline/online.
+
+\section{Conclusion}
+We showed how chaumian bank mints can be federated using existing protocols.
+The lessened trust put into every single fed-mint node can be used to lessen the need to identify the operator which makes them less vulnerable to attacks in the physical realm.
+By using multisig secured bitcoins as backing asset we can mitigate the risk of theft by attackers even if they manage to compromise single fed-mint nodes.
+
+\printbibliography
+
+\end{document}
